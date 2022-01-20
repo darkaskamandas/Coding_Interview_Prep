@@ -1,0 +1,12 @@
+function insertionSort (array) {
+  for (let currentIndex = 0; currentIndex < array.length; currentIndex++) {
+    let current = array[currentIndex];
+    let j = currentIndex - 1;
+    while (j > -1 && array[j] > current) {
+      array[j + 1] = array[j];
+      j--;
+    }
+    array[j + 1] = current;
+  }
+  return array;
+}
