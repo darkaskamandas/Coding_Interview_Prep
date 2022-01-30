@@ -1,0 +1,17 @@
+function countCoins() {
+  var quarter = Array.from(Array(4).keys());
+  var dime = Array.from(Array(10).keys());
+  var nickel = Array.from(Array(20).keys());
+  var penny = Array.from(Array(20).keys());
+
+  var parts = [quarter,dime,nickel,penny],
+      result = parts.reduce((a, b) => a.reduce((r, v) => r.concat(b.map(w => [].concat(v, w))), []));
+
+  var result1 = result.map((sub) => sub[0]*25 + sub[1]*10 + sub[2]*5 + sub[3]*5);
+
+  const result2 = new Map([...new Set(result1)].map(
+      x => [x, result1.filter(y => y === x).length]
+  ));
+
+  return result2.get(100)+4;
+}
