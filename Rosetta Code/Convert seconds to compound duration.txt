@@ -1,0 +1,33 @@
+function convertSeconds(sec) {
+  /* Returns the inserted unit (week, day... but in seconds)
+      as many times as it fits the remaining time to be converted.
+      Also removes this result from the remaining time. */
+  function secsToUnits(unitInSecs) {
+    const converted = Math.floor(sec / unitInSecs);
+    sec -= converted * unitInSecs;
+    return converted;
+  }
+
+  /* Returns a comma if there is still time to convert. */
+  function addComma() {
+    return (sec === 0) ? "" : ", ";
+  }
+
+  /* If the converted time for a given unit is 0,
+      returns an empty string,
+     else, returns a string containing the converted time
+      with the adequate suffix,
+      plus a comma if there is still time to convert. */
+  function secToUnitString(time, notation) {
+    const converted = secsToUnits(time);
+    return (converted === 0) ?
+      "" :
+      converted + " " + notation + addComma();
+  }
+
+  return secToUnitString(604800, "wk") +
+    secToUnitString(86400, "d") +
+    secToUnitString(3600, "hr") +
+    secToUnitString(60, "min") +
+    secToUnitString(1, "sec");
+}
