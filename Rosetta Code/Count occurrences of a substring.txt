@@ -1,0 +1,4 @@
+function countSubstring(main_str, sub_str){
+    var subStr = sub_str.replace(/[*]/, '\\*');
+    return (main_str.match(new RegExp(subStr, 'gi'))).length;
+  }
