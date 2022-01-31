@@ -1,0 +1,26 @@
+function operation(op, arr1, arr2) {
+    if(op=="m_add"){
+        return arr1.map((subarray,idx) => 
+               subarray.map((x,idx2) => x + arr2[idx][idx2]));
+    }
+    if(op=="m_sub"){
+        return arr1.map((subarray,idx) => 
+               subarray.map((x,idx2) => x - arr2[idx][idx2]));
+    }
+    if(op=="m_mult"){
+        return arr1.map((subarray,idx) => 
+               subarray.map((x,idx2) => x*arr2[idx][idx2]));
+    }
+    if(op=="m_div"){
+        return arr1.map((subarray,idx) => 
+               subarray.map((x,idx2) => x/arr2[idx][idx2]));
+    }
+    if(op=="m_exp"){
+        return arr1.map((subarray,idx) => 
+               subarray.map((x,idx2) => x**arr2[idx][idx2]));
+    }
+    if(op=="s_add"){
+        return arr1.map((subarray) => 
+               subarray.map((x) => x + arr2));
+    }
+}
