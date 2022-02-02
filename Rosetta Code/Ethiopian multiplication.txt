@@ -1,0 +1,7 @@
+const halve = (n) => Math.floor(n/2);
+const double = (n) => n + n;
+const isEven = (n) => n % 2 === 0;
+
+function eth_mult(a, b) {
+  return a > 1 ? (eth_mult(halve(a), double(b)) + (isEven(a) ? 0 : b)) : b;
+}
