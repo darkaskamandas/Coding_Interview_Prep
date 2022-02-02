@@ -1,0 +1,27 @@
+function markov(rules,test) {
+    let pattern = new RegExp("^([^#]*?)\\s+->\\s+(\\.?)(.*)");
+    let origTest = test;
+
+    let captures = [];
+
+    rules.forEach(function(rule){
+        let m = pattern.exec(rule);
+        for (let j = 0; j < m.length; j++)
+            m[j] = m[j + 1];
+        captures.push(m);
+    });
+
+    test = origTest;
+    let copy = test;
+    for (let j = 0; j < captures.length; j++) {
+        let c = captures[j];
+        test = test.replace(c[0], c[2]);
+        if (c[1]==".")
+            break;
+        if (test!=copy) {
+            j = -1;
+            copy = test;
+        }
+    }
+    return test;
+}
