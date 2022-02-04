@@ -1,0 +1,18 @@
+function sym(args) {
+  var setA = new Set();
+  var setB = new Set();
+  
+  function checkIfHas(element) {
+    if (setA.has(element)) {
+      setA.delete(element);
+    } else {
+      setA.add(element);
+    }
+  }
+  
+  for (var i = 0; i < arguments.length; i++) {
+    setB = new Set(arguments[i]).forEach(checkIfHas);
+  }
+  
+  return Array.from(setA);
+}﻿
