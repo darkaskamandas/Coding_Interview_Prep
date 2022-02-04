@@ -1,0 +1,30 @@
+function isHarshadOrNiven() {
+  const res = {
+    firstTwenty: [],
+    firstOver1000: undefined
+  };
+  // Only change code below this line
+  var i = 1;
+  do {
+    var result = Array.from(i.toString()).map(Number);
+    var sum = result.reduce((a, b)=> a + b, 0);
+    if(i%sum==0){
+      res.firstTwenty.push(i)
+    }
+    i++;
+  }
+  while (res.firstTwenty.length < 20);
+
+  var i = 1001;
+  do {
+    var result = Array.from(i.toString()).map(Number);
+    var sum = result.reduce((a, b)=> a + b, 0);
+    if(i%sum==0){
+      res.firstOver1000 = i;
+    }
+    i++;
+  }
+  while (i%sum==0);  
+
+  return res;
+}
