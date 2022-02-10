@@ -1,0 +1,10 @@
+function iteratedSquare(n) {
+    var result = Array.from(n.toString()).map(Number).map(x => x ** 2);
+    var sum = result.reduce((a, b)=> a + b, 0);
+    if(sum == 89|sum == 1){
+      return sum;
+    }
+    else{
+      return iteratedSquare(sum)  
+    }
+}
