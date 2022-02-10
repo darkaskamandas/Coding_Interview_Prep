@@ -1,0 +1,8 @@
+function loopSimult(A) {
+
+    var B = A[0].map((_, colIndex) => A.map(row => row[colIndex]));
+
+    var C = B.map(row => row.reduce((a, b)=> a + b, ''))
+    
+    return C
+}
