@@ -1,0 +1,18 @@
+function dotProduct(...vectors) {
+  // If invalid input, return null
+  if (vectors.length != 2 ||
+      vectors[0].length != vectors[1].length) {
+    return null;
+  }
+
+  // Compute dot product
+  let sum = 0;
+  for (let i = 0; i < vectors[0].length; i++) {
+    let prod = 1;
+    for (let j = 0; j < 2; j++) {
+      prod *= vectors[j][i];
+    }
+    sum += prod;
+  }
+  return sum;
+}
