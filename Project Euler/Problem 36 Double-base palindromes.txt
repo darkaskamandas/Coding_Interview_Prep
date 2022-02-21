@@ -1,0 +1,21 @@
+function isPalindromes(n) {
+  const numString = n.toString();
+  for (let i = 0; i < numString.length / 2; i++) {
+    if (numString[i] !== numString[numString.length - i - 1]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function doubleBasePalindromes(n) {
+  let sum = 0;
+  for (let i = 1; i < n; i++) {
+    if (isPalindromes(i) && isPalindromes(i.toString(2))) {
+      sum += i;
+    }
+  }
+  return sum;
+}
+
+doubleBasePalindromes(1000000);
