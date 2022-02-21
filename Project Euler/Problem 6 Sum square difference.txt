@@ -1,0 +1,7 @@
+function sumSquareDifference(n) {
+  const sumOfN = (n*(n+1))/2;
+  const sumOfNSquare = (n*(n+1)*(2*n+1))/6;
+  
+  //** is exponentaial operator added in ES7, it's equivalent to Math.pow(num, 2)`
+  return (sumOfN ** 2) - sumOfNSquare;
+}
