@@ -1,0 +1,990 @@
+import React from "react";
+import { render } from "react-dom";
+import "./styles.css";
+
+const GOLDEN_RATIO = 1.61803398875;
+
+function clone(obj) {
+  return JSON.parse(JSON.stringify(obj));
+}
+
+function random(min, max) {
+  return Math.round(Math.random() * (max - min)) + min;
+}
+
+function randomItemFrom(arr) {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+
+function BoxFactory(i, j, height = 1, width = 1) {
+  return { position: { i, j }, height, width };
+}
+
+function isBoxWithinBox(inner, outer) {
+  return (
+    inner.position.i >= outer.position.i &&
+    inner.position.i + inner.height <= outer.position.i + outer.height &&
+    inner.position.j >= outer.position.j &&
+    inner.position.j + inner.width <= outer.position.j + outer.width
+  );
+}
+
+function areBoxesDisjoint(box1, box2) {
+  const b1Pos = box1.position;
+  const b1N = b1Pos.i;
+  const b1E = b1Pos.j + box1.width;
+  const b1S = b1Pos.i + box1.height;
+  const b1W = b1Pos.j;
+
+  const b2Pos = box2.position;
+  const b2N = b2Pos.i;
+  const b2E = b2Pos.j + box2.width;
+  const b2S = b2Pos.i + box2.height;
+  const b2W = b2Pos.j;
+
+  return b1S < b2N || b2S < b1N || b1E < b2W || b2E < b1W;
+}
+
+function sumBoxAreas(boxes) {
+  return boxes.reduce((acc, curr) => acc + curr.height * curr.width, 0);
+}
+
+function boxWithPadding(box, padding = 1) {
+  const withPadding = {
+    height: box.height - padding * 2,
+    width: box.width - padding * 2,
+    position: ijPlus(box.position, { i: padding, j: padding })
+  };
+  return withPadding;
+}
+
+// Assumes viewPort fits within or is equal to dungeonBox
+function viewPortCenteredOnPlayer(prevViewPort, dungeonBox, playerPosition) {
+  function centerViewPortSide(viewPortLength, dungeonBoxLength, playerValue) {
+    const offset = Math.floor(viewPortLength / 2);
+    let viewPortSideValue;
+    if (playerValue - offset < 0) {
+      viewPortSideValue = 0;
+    } else if (playerValue + offset > dungeonBoxLength) {
+      viewPortSideValue = dungeonBoxLength - viewPortLength;
+    } else {
+      viewPortSideValue = playerValue - offset;
+    }
+
+    return viewPortSideValue;
+  }
+
+  return {
+    height: prevViewPort.height,
+    width: prevViewPort.width,
+    position: {
+      i: centerViewPortSide(
+        prevViewPort.height,
+        dungeonBox.height,
+        playerPosition.i
+      ),
+      j: centerViewPortSide(
+        prevViewPort.width,
+        dungeonBox.width,
+        playerPosition.j
+      )
+    }
+  };
+}
+
+function hasTileVisitWithinRadius(radius, i, j, dungeon) {
+  for (let y = i - radius; y < i + radius; y++) {
+    for (let x = j - radius; x < j + radius; x++) {
+      const isWithinDungeon =
+        y >= 0 && y < dungeon.height && x >= 0 && x < dungeon.width;
+      if (!isWithinDungeon) continue;
+
+      const isWithinRadius =
+        Math.sqrt(Math.pow(y - i, 2) + Math.pow(x - j, 2)) <= radius;
+      const hasVisit = dungeon.tileVisitCounts[y][x] !== 0;
+      if (isWithinRadius && hasVisit) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+const SETTINGS = {
+  minSpaceLength: 5,
+  maxSpaceLength: 15,
+  tileRevealRadius: 10,
+  levelBoundaries: [0, 32, 64, 128, 256, 512, 1024, 2048, 4096, Infinity],
+  // there are 4 dungeons but 5 weapons because the player starts with the first
+  // weapon
+  weapons: [
+    {
+      name: "fists",
+      strength: 1
+    },
+    {
+      name: "brass knuckles",
+      strength: 2
+    },
+    {
+      name: "baseball bat",
+      strength: 3
+    },
+    {
+      name: "Mjolnir",
+      strength: 4
+    },
+    {
+      name: "lightning bolt",
+      strength: 5
+    }
+  ],
+  numDungeons: 4,
+  baseHeight: 42,
+  boss: {
+    dungeonIdx: 0,
+    sideLength: 2 // boss occupies a sideLength x sideLength square
+  }
+};
+
+function randomEmptyBox(spaces, items, height = 1, width = 1) {
+  let newEmptyBox;
+  let attemptsLeft = 700;
+  while (!newEmptyBox && attemptsLeft > 0) {
+    attemptsLeft--;
+    let space = randomItemFrom(spaces);
+
+    // let's not have that many items on tunnels
+    const skipTunnelProbability = 0.95;
+    if (
+      sumBoxAreas([space]) === 1 && // tunnels have area == 1x1
+      Math.random() < skipTunnelProbability
+    ) {
+      continue;
+    }
+
+    let [minI, minJ] = [space.position.i, space.position.j];
+    let [maxI, maxJ] = [
+      minI + space.height - height,
+      minJ + space.width - width
+    ];
+    if (minI > maxI || minJ > maxJ) {
+      continue;
+    }
+
+    newEmptyBox = BoxFactory(
+      random(minI, maxI),
+      random(minJ, maxJ),
+      height,
+      width
+    );
+    let hasOverlap = item => !areBoxesDisjoint(newEmptyBox, item);
+    if (items.some(hasOverlap)) {
+      newEmptyBox = null;
+      continue;
+    }
+  }
+  return newEmptyBox;
+}
+
+function randomWeaponItems(spaces, items, dungeonIdx) {
+  const weapons = SETTINGS.weapons;
+  const newEmptyBox = randomEmptyBox(spaces, items);
+  if (!newEmptyBox) return [];
+
+  // We're using dungeonIdx _+ 1_ because the first weapon is the one the
+  // player starts with, so on dungeonIdx === 0 they see weaponIdx === 1.
+  const baseWeaponItem = { type: "weapon", ...weapons[dungeonIdx + 1] };
+  const weaponItem = { ...baseWeaponItem, ...newEmptyBox };
+  return [weaponItem];
+}
+
+function randomHealthItems(spaces, items, dungeonIdx) {
+  const health = 10 * (dungeonIdx + 1);
+  // baseHealthItem has everything we need except position
+  // FIXME: we should use a constructor or factory function or whatever here.
+  const baseHealthItem = { type: "health", health };
+  const numHealthItems = spaces.length / 6;
+  const healthItems = [];
+
+  for (let i = 0; i < numHealthItems; i++) {
+    let newEmptyBox = randomEmptyBox(spaces, items.concat(healthItems));
+    if (!newEmptyBox) break;
+
+    let healthItem = { ...baseHealthItem, ...newEmptyBox };
+    healthItems.push(healthItem);
+  }
+  return healthItems;
+}
+
+function randomEnemyItems(spaces, items, dungeonIdx) {
+  const health = 10 * (dungeonIdx + 1);
+  const level = dungeonIdx + 1;
+  const baseEnemyItem = { type: "enemy", health, level };
+  const numEnemyItems = spaces.length / 3;
+  const enemyItems = [];
+
+  for (let i = 0; i < numEnemyItems; i++) {
+    let newEmptyBox = randomEmptyBox(spaces, items.concat(enemyItems));
+    if (!newEmptyBox) break;
+
+    let enemyItem = { ...baseEnemyItem, ...newEmptyBox };
+    enemyItems.push(enemyItem);
+  }
+  return enemyItems;
+}
+
+function randomBossItems(spaces, items, dungeonIdx) {
+  // The boss should always in the last dungeon
+  if (dungeonIdx !== SETTINGS.numDungeons - 1) return [];
+  const sideLength = SETTINGS.boss.sideLength;
+  const badAssedness = sideLength * sideLength;
+
+  const health = badAssedness * 10 * (dungeonIdx + 1);
+  const level = badAssedness * (dungeonIdx + 1);
+
+  // { isBoss: true } is a big HACK
+  const baseBossItem = { type: "enemy", isBoss: true, health, level };
+  const newEmptyBox = randomEmptyBox(spaces, items, sideLength, sideLength);
+  if (!newEmptyBox) return [];
+
+  const bossItem = { ...baseBossItem, ...newEmptyBox };
+  return [bossItem];
+}
+
+function randomPortalItems(spaces, items, dungeonIdx) {
+  const newEmptyBox = randomEmptyBox(spaces, items, 2, 1);
+  if (!newEmptyBox) return [];
+  if (dungeonIdx + 1 >= SETTINGS.numDungeons) return [];
+  // You'll notice that portals don't have a destination, as one might think
+  // they should. For simplicity's sake, the destination of all portals is a
+  // random position in the next dungeon, as per calculated in the action
+  // creator (`randomlyBounceToNextDungeon`).
+  return [{ type: "portal", ...newEmptyBox }];
+}
+
+function ijPlus(a, b) {
+  return { i: a.i + b.i, j: a.j + b.j };
+}
+
+// This is a HACK, because dungeonIdx is not part of the player's `avatar`,
+// where the {i,j} position is kept. So we return a "player" object with only
+// dungeonIdx and avatar to be shallow-merged into the real one in the state
+// tree.
+function randomPlayerLocation(dungeons, dungeonIdx) {
+  const spaces = dungeons[dungeonIdx].spaces;
+  const items = dungeons[dungeonIdx].items;
+  const newEmptyBox = randomEmptyBox(spaces, items);
+  return {
+    dungeonIdx,
+    avatar: {
+      type: "player",
+      ...newEmptyBox
+    }
+  };
+}
+
+function randomlyBounceToNextDungeonAction(prevState) {
+  // Generate randomness here in the action creator instead of in the
+  // reducer so that the reducer remains purely functional.
+  const dungeons = prevState.game.dungeons;
+  const dungeonIdx = prevState.game.player.dungeonIdx;
+
+  if (dungeonIdx + 1 >= SETTINGS.numDungeons) return prevState;
+
+  const nextPlayerLocation = randomPlayerLocation(dungeons, dungeonIdx + 1);
+  const destination = {
+    dungeonIdx: nextPlayerLocation.dungeonIdx,
+    position: nextPlayerLocation.avatar.position
+  };
+  const action = {
+    type: "MOVE",
+    payload: destination
+  };
+  return action;
+}
+
+function moveReducer(prevState, action) {
+  const nextState = clone(prevState);
+  const destination = action.payload;
+  const currDungeon = prevState.game.dungeons[prevState.game.player.dungeonIdx];
+  const destDungeon = nextState.game.dungeons[destination.dungeonIdx];
+
+  const prevPlayer = prevState.game.player;
+  const nextPlayer = clone(prevPlayer);
+  nextPlayer.dungeonIdx = destination.dungeonIdx;
+  nextPlayer.avatar.position = destination.position;
+
+  const nextTileVisitCounts = destDungeon.tileVisitCounts;
+  const { i, j } = nextPlayer.avatar.position;
+  nextTileVisitCounts[i][j]++;
+
+  const prevViewPort = prevState.game.viewPort;
+  const nextViewPort = viewPortCenteredOnPlayer(
+    prevViewPort,
+    destDungeon,
+    nextPlayer.avatar.position
+  );
+
+  nextState.game.viewPort = nextViewPort;
+
+  nextState.game.player = nextPlayer;
+  return nextState;
+}
+
+function deleteItem(prevState, nextState, item) {
+  const prevItems =
+    prevState.game.dungeons[prevState.game.player.dungeonIdx].items;
+  const itemIdx = prevItems.indexOf(item);
+  const nextItems =
+    nextState.game.dungeons[nextState.game.player.dungeonIdx].items;
+  nextItems.splice(itemIdx, 1);
+}
+
+function collectWeaponReducer(prevState, action) {
+  const nextState = clone(prevState);
+  function deleteWeaponItem() {
+    const item = action.payload;
+    deleteItem(prevState, nextState, item);
+  }
+  function updatePlayerWeapon() {
+    const weaponItem = action.payload;
+    const weaponIdx = SETTINGS.weapons.findIndex(
+      weapon => weapon.name === weaponItem.name
+    );
+    const nextPlayer = nextState.game.player;
+    nextPlayer.weaponIdx = weaponIdx;
+  }
+  deleteWeaponItem();
+  updatePlayerWeapon();
+  return nextState;
+}
+
+function collectHealthReducer(prevState, action) {
+  const nextState = clone(prevState);
+  function deleteHealthItem() {
+    const item = action.payload;
+    deleteItem(prevState, nextState, item);
+  }
+  function updatePlayerHealth() {
+    const healthItem = action.payload;
+    const nextPlayer = nextState.game.player;
+    nextPlayer.health += healthItem.health;
+  }
+  deleteHealthItem();
+  updatePlayerHealth();
+  return nextState;
+}
+
+function levelFromXP(xp) {
+  return SETTINGS.levelBoundaries.findIndex(b => b > xp);
+}
+
+function xpUntilNextLevel(xp) {
+  return SETTINGS.levelBoundaries[levelFromXP(xp)] - xp;
+}
+
+function attackEnemyReducer(prevState, action) {
+  const nextState = clone(prevState);
+  const prevEnemy = action.payload;
+  deleteItem(prevState, nextState, prevEnemy);
+  const nextEnemy = clone(prevEnemy);
+
+  const damageFromEnemy = action.meta.randomnessFromEnemy * nextEnemy.level;
+  const nextPlayer = nextState.game.player;
+  nextPlayer.health -= Math.round(damageFromEnemy);
+
+  if (nextPlayer.health <= 0) {
+    nextState.game.status = "lost";
+    return nextState;
+  }
+
+  const weapon = SETTINGS.weapons[nextPlayer.weaponIdx];
+  const damageFromPlayer =
+    action.meta.randomnessFromPlayer *
+    levelFromXP(nextPlayer.xp) *
+    weapon.strength;
+  nextEnemy.health -= Math.round(damageFromPlayer);
+
+  const nextItems =
+    nextState.game.dungeons[nextState.game.player.dungeonIdx].items;
+  if (nextEnemy.health > 0) {
+    nextItems.push(nextEnemy);
+  } else {
+    if (nextEnemy.isBoss) {
+      nextState.game.status = "won";
+    }
+    nextPlayer.xp += nextEnemy.level * 10;
+  }
+
+  return nextState;
+}
+
+function playAgainReducer(prevState, action) {
+  return stateFactory();
+}
+
+function toggleShadowReducer(prevState, action) {
+  const nextState = clone(prevState);
+  nextState.showShadow = !nextState.showShadow;
+  return nextState;
+}
+
+// When it returns `null` it means it's a wall or it's out of the dungeon
+// boundaries.
+function itemOrSpaceAt(state, position) {
+  const positionBox = { height: 1, width: 1, position };
+  const dungeon = state.game.dungeons[state.game.player.dungeonIdx];
+  const items = dungeon.items;
+  const matchedItem = items.find(a => isBoxWithinBox(positionBox, a));
+
+  const spaces = dungeon.spaces;
+  const matchedSpace = spaces.find(s => isBoxWithinBox(positionBox, s));
+
+  return matchedItem || matchedSpace || null;
+}
+
+function reducer(prevState, action) {
+  switch (action.type) {
+    case "MOVE":
+      return moveReducer(prevState, action);
+      break;
+    case "COLLECT_HEALTH":
+      return collectHealthReducer(prevState, action);
+      break;
+    case "COLLECT_WEAPON":
+      return collectWeaponReducer(prevState, action);
+      break;
+    case "ATTACK_ENEMY":
+      return attackEnemyReducer(prevState, action);
+      break;
+    case "PLAY_AGAIN":
+      return playAgainReducer(prevState, action);
+      break;
+    case "TOGGLE_SHADOW":
+      return toggleShadowReducer(prevState, action);
+      break;
+    default:
+      console.warn("Unhandled action:\n", action);
+      return prevState;
+  }
+}
+
+function ViewPort({ squares }) {
+  const trs = squares.map(row => (
+    <tr className="viewPortRow">
+      {row.map(cell => <td className={`viewPortCell ${cell}`} />)}
+    </tr>
+  ));
+  return (
+    <div className="viewPort">
+      <table className="viewPortTable">
+        <tbody className="viewPortBody">{trs}</tbody>
+      </table>
+    </div>
+  );
+}
+
+function randomSpacesAndTunnels(dungeonBox) {
+  function randomNeighborSpace(sourceSpace) {
+    const height = random(SETTINGS.minSpaceLength, SETTINGS.maxSpaceLength);
+    const width = random(SETTINGS.minSpaceLength, SETTINGS.maxSpaceLength);
+
+    const b1Pos = sourceSpace.position;
+    const b1N = b1Pos.i;
+    const b1E = b1Pos.j + sourceSpace.width;
+    const b1S = b1Pos.i + sourceSpace.height;
+    const b1W = b1Pos.j;
+
+    const direction = randomItemFrom(["N", "E", "S", "W"]);
+    var minI, maxI, minJ, maxJ;
+
+    switch (direction) {
+      case "N": {
+        minI = b1N - height - 1;
+        maxI = minI;
+        minJ = b1W - width + 1;
+        maxJ = b1E - 1;
+        break;
+      }
+      case "E": {
+        minI = b1N - height + 1;
+        maxI = b1S - 1;
+        minJ = b1E + 1;
+        maxJ = minJ;
+        break;
+      }
+      case "S": {
+        minI = b1S + 1;
+        maxI = minI;
+        minJ = b1W - width + 1;
+        maxJ = b1E - 1;
+        break;
+      }
+      case "W": {
+        minI = b1N - height + 1;
+        maxI = b1S - 1;
+        minJ = b1W - width - 1;
+        maxJ = minJ;
+        break;
+      }
+    }
+
+    const position = {
+      i: random(minI, maxI),
+      j: random(minJ, maxJ)
+    };
+    // FIXME: this should use a constructor/factory function
+    return { type: "space", height, width, position };
+  }
+
+  // TODO: DRY this up
+  function potentialTunnelsSouthAndEast(box1, box2) {
+    function newTunnel(i, j) {
+      // FIXME: this should use a constructor/factory function
+      const tunnel = BoxFactory(i, j);
+      tunnel.type = "space";
+      return tunnel;
+    }
+    const b1Pos = box1.position;
+    const b1N = b1Pos.i;
+    const b1E = b1Pos.j + box1.width;
+    const b1S = b1Pos.i + box1.height;
+    const b1W = b1Pos.j;
+
+    const b2Pos = box2.position;
+    const b2N = b2Pos.i;
+    const b2E = b2Pos.j + box2.width;
+    const b2S = b2Pos.i + box2.height;
+    const b2W = b2Pos.j;
+
+    var i, j;
+    var minI, maxI, minJ, maxJ;
+    const pTunnels = []; // potential tunnels
+
+    // box2 is south of box1
+    if (b2N === b1S + 1) {
+      minJ = Math.max(b1W, b2W);
+      maxJ = Math.min(b1E, b2E);
+
+      i = b1S;
+      for (j = minJ; j < maxJ; j++) {
+        pTunnels.push(newTunnel(i, j));
+      }
+    }
+
+    // box2 is east of box1
+    if (b2W === b1E + 1) {
+      minI = Math.max(b1N, b2N);
+      maxI = Math.min(b1S, b2S);
+
+      j = b1E;
+      for (i = minI; i < maxI; i++) {
+        pTunnels.push(newTunnel(i, j));
+      }
+    }
+
+    return pTunnels;
+  }
+
+  function potentialTunnels(box1, box2) {
+    const southAndEast = potentialTunnelsSouthAndEast(box1, box2);
+    const northAndWest = potentialTunnelsSouthAndEast(box2, box1);
+    return southAndEast.concat(northAndWest);
+  }
+
+  function randomSpaces(dungeonBox) {
+    // We want to leave a padding of walls in the dungeon so that when a space
+    // goes to the edge of the viewport it is unambiguously a space that
+    // continues beyond it, not one that ends there.
+    const dungeonWithPadding = boxWithPadding(dungeonBox, 2);
+
+    let firstSpace;
+    do {
+      const height = random(SETTINGS.minSpaceLength, SETTINGS.maxSpaceLength);
+      const width = random(SETTINGS.minSpaceLength, SETTINGS.maxSpaceLength);
+      const i = random(0, dungeonBox.height - height);
+      const j = random(0, dungeonBox.width - width);
+      // FIXME: this should use a constructor/factory function
+      firstSpace = { type: "space", height, width, position: { i, j } };
+    } while (!isBoxWithinBox(firstSpace, dungeonWithPadding));
+    const spaces = [firstSpace];
+
+    var attemptsLeft = 700;
+    while (
+      sumBoxAreas(spaces) < sumBoxAreas([dungeonBox]) / 2 &&
+      attemptsLeft > 0
+    ) {
+      attemptsLeft--;
+      var currentSpace = randomItemFrom(spaces);
+      var newSpace = randomNeighborSpace(currentSpace);
+
+      const withinDungeon = isBoxWithinBox(newSpace, dungeonWithPadding);
+      const isolated = spaces.every(s => areBoxesDisjoint(newSpace, s));
+      if (withinDungeon && isolated) {
+        spaces.push(newSpace);
+      }
+    }
+
+    return spaces;
+  }
+
+  const spaces = randomSpaces(dungeonBox);
+
+  const tunnels = [];
+  for (var i = 0; i < spaces.length; i++) {
+    for (var j = i + 1; j < spaces.length; j++) {
+      let newTunnel = randomItemFrom(potentialTunnels(spaces[i], spaces[j]));
+      if (newTunnel) {
+        tunnels.push(newTunnel);
+      }
+    }
+  }
+
+  return spaces.concat(tunnels);
+}
+
+function stateFactory() {
+  const baseHeight = SETTINGS.baseHeight;
+  let dungeons = [];
+  const startingDungeonIdx = 0;
+
+  for (let dungeonIdx = 0; dungeonIdx < SETTINGS.numDungeons; dungeonIdx++) {
+    const dungeonBox = {
+      height: Math.round(baseHeight * 1.1),
+      width: Math.round(GOLDEN_RATIO * baseHeight * 1.1),
+      position: { i: 0, j: 0 }
+    };
+
+    let tileVisitCounts = [];
+    for (let i = 0; i < dungeonBox.height; i++) {
+      tileVisitCounts.push([]);
+      for (let j = 0; j < dungeonBox.width; j++) {
+        tileVisitCounts[i][j] = 0;
+      }
+    }
+
+    // tunnels are also spaces that happen to be 1x1 in size and connect 2
+    // spaces
+    const spaces = randomSpacesAndTunnels(dungeonBox);
+
+    let items = [];
+    const healthItems = randomHealthItems(spaces, items, dungeonIdx);
+    items = [...healthItems];
+    const weaponItems = randomWeaponItems(spaces, items, dungeonIdx);
+    items = [...healthItems, ...weaponItems];
+    const enemyItems = randomEnemyItems(spaces, items, dungeonIdx);
+    items = [...healthItems, ...weaponItems, ...enemyItems];
+    const bossItems = randomBossItems(spaces, items, dungeonIdx);
+    items = [...healthItems, ...weaponItems, ...enemyItems, ...bossItems];
+    const portalItems = randomPortalItems(spaces, items, dungeonIdx);
+    items = [
+      ...healthItems,
+      ...weaponItems,
+      ...enemyItems,
+      ...bossItems,
+      ...portalItems
+    ];
+
+    dungeons.push({ ...dungeonBox, spaces, items, tileVisitCounts });
+  }
+
+  // avatar protocol is type + box protocol, i.e., { type, width, height,
+  // position}
+  const startingDungeon = dungeons[startingDungeonIdx];
+  const playerLocation = randomPlayerLocation(dungeons, startingDungeonIdx);
+
+  const baseViewPortHeight = Math.floor(2 * startingDungeon.height / 3);
+  const baseViewPortWidth = Math.floor(2 * startingDungeon.width / 3);
+  const baseViewPortPosition = { i: 0, j: 0 };
+  const baseViewPort = {
+    height: baseViewPortHeight,
+    width: baseViewPortWidth,
+    position: baseViewPortPosition
+  };
+
+  const viewPort = viewPortCenteredOnPlayer(
+    baseViewPort,
+    startingDungeon,
+    playerLocation.avatar.position
+  );
+
+  const { i, j } = playerLocation.avatar.position;
+  startingDungeon.tileVisitCounts[i][j]++;
+
+  // position === "top-left dungeon position", using i and j
+  return {
+    showShadow: true,
+    game: {
+      status: "playing",
+      player: {
+        xp: 0,
+        health: 100,
+        weaponIdx: 0,
+        ...playerLocation
+      },
+      viewPort,
+      dungeons
+    }
+  };
+}
+
+class App extends React.Component {
+  constructor() {
+    super();
+    this.state = stateFactory();
+    this.handleKeydownEvent = this.handleKeydownEvent.bind(this);
+    this.handlePlayAgainClick = this.handlePlayAgainClick.bind(this);
+    this.handleToggleShadowClick = this.handleToggleShadowClick.bind(this);
+  }
+
+  handleToggleShadowClick(event) {
+    this.setState(prevState => {
+      const action = { type: "TOGGLE_SHADOW" };
+      return reducer(prevState, action);
+    });
+  }
+
+  handlePlayAgainClick(event) {
+    this.setState(prevState => {
+      const action = { type: "PLAY_AGAIN" };
+      return reducer(prevState, action);
+    });
+  }
+
+  handleKeydownEvent(event) {
+    const key = event.key;
+    const keyToDirection = {
+      ArrowUp: { name: "N", i: -1, j: 0 },
+      ArrowRight: { name: "E", i: 0, j: 1 },
+      ArrowDown: { name: "S", i: 1, j: 0 },
+      ArrowLeft: { name: "W", i: 0, j: -1 }
+    };
+    if (Object.keys(keyToDirection).indexOf(key) !== -1) {
+      this.setState(prevState => {
+        // If health <=0 the game is over and we don't respond to arrow keys
+        if (prevState.game.player.health <= 0) {
+          return prevState;
+        }
+        // Tease out user action/intent from key pressed
+        const direction = keyToDirection[key];
+        const potentialNextPosition = ijPlus(
+          prevState.game.player.avatar.position,
+          direction
+        );
+        const itemOrSpace = itemOrSpaceAt(prevState, potentialNextPosition);
+        if (!itemOrSpace) return prevState;
+
+        const destination = {
+          dungeonIdx: prevState.game.player.dungeonIdx,
+          position: potentialNextPosition
+        };
+
+        let action;
+        switch (itemOrSpace.type) {
+          case "health":
+            action = {
+              type: "COLLECT_HEALTH",
+              payload: itemOrSpace
+            };
+            break;
+          case "weapon":
+            action = {
+              type: "COLLECT_WEAPON",
+              payload: itemOrSpace
+            };
+            break;
+          case "enemy":
+            // Generate randomness here in the action creator instead of in the
+            // reducer so that the reducer remains purely functional.
+            const randomnessFromPlayer = Math.random();
+            const randomnessFromEnemy = Math.random();
+            action = {
+              type: "ATTACK_ENEMY",
+              meta: { randomnessFromPlayer, randomnessFromEnemy },
+              payload: itemOrSpace
+            };
+            break;
+          case "space":
+            action = {
+              type: "MOVE",
+              payload: destination
+            };
+            break;
+          case "portal":
+            action = randomlyBounceToNextDungeonAction(prevState);
+            return reducer(prevState, action);
+            break;
+          default:
+            return prevState;
+        }
+
+        const nextState = reducer(prevState, action);
+        return nextState;
+      });
+    } else if (key === "Enter") {
+      this.setState(prevState => {
+        if (prevState.game.status === "playing") {
+          return prevState;
+        } else {
+          const action = {
+            type: "PLAY_AGAIN"
+          };
+          return reducer(prevState, action);
+        }
+      });
+      // "n" key is a cheat to move to the next dungeon without going through a
+      // portal
+    } else if (key === "n") {
+      this.setState(prevState => {
+        const action = randomlyBounceToNextDungeonAction(prevState);
+        return reducer(prevState, action);
+      });
+    } else {
+      console.warn("Unhandled key event:\n", event);
+    }
+  }
+
+  componentDidMount() {
+    window.addEventListener("keydown", this.handleKeydownEvent);
+  }
+
+  // y and x correspond to i and j in matrix notation, that's why they're in
+  // this order. In particular, we use y and x to refer to the viewPort-relative
+  // coordinates, and i and j to the dungeon-relative (i.e, absolute)
+  // coordinates.
+  squareAt(y, x) {
+    const viewPort = this.state.game.viewPort;
+    const i = viewPort.position.i + y;
+    const j = viewPort.position.j + x;
+    const dungeon = this.state.game.dungeons[this.state.game.player.dungeonIdx];
+
+    const radius = SETTINGS.tileRevealRadius;
+    if (
+      this.state.showShadow &&
+      !hasTileVisitWithinRadius(radius, i, j, dungeon)
+    )
+      return "shadow";
+
+    const squareBox = {
+      position: { i, j },
+      height: 1,
+      width: 1
+    };
+    const dungeonAvatars = dungeon.items;
+    const playerAvatar = this.state.game.player.avatar;
+    const avatars = dungeonAvatars.concat([playerAvatar]);
+    const matchedAvatar = avatars.find(a => isBoxWithinBox(squareBox, a));
+
+    const spaces = dungeon.spaces;
+    const matchedSpace = spaces.find(s => isBoxWithinBox(squareBox, s));
+    if (matchedAvatar) {
+      return matchedAvatar.type;
+    } else if (matchedSpace) {
+      return "space";
+    } else {
+      return "wall";
+    }
+  }
+
+  squares() {
+    const squares = [];
+    for (var y = 0; y < this.state.game.viewPort.height; y++) {
+      squares.push([]);
+      for (var x = 0; x < this.state.game.viewPort.width; x++) {
+        squares[y].push(this.squareAt(y, x));
+      }
+    }
+    return squares;
+  }
+
+  renderGame() {
+    const weapon = SETTINGS.weapons[this.state.game.player.weaponIdx];
+    return (
+      <div className="centerer">
+        <div className="centerVertical">
+          <h1>Roguelike React</h1>
+          <p>Kill boss in dungeon {SETTINGS.numDungeons} to win.</p>
+          <div className="stats">
+            <table className="statsTable">
+              <tbody>
+                <tr>
+                  <td>Dungeon</td>
+                  <td>{this.state.game.player.dungeonIdx + 1}</td>
+                </tr>
+                <tr>
+                  <td>Level</td>
+                  <td>{levelFromXP(this.state.game.player.xp)}</td>
+                </tr>
+                <tr>
+                  <td>Next level</td>
+                  <td>{xpUntilNextLevel(this.state.game.player.xp)}&nbsp;XP</td>
+                </tr>
+                <tr>
+                  <td>Health</td>
+                  <td>{this.state.game.player.health}</td>
+                </tr>
+                <tr>
+                  <td>Weapon</td>
+                  <td>{weapon.name}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <br />
+          <ViewPort squares={this.squares()} />
+          <br />
+          <button onClick={this.handleToggleShadowClick}>Toggle shadow</button>
+        </div>
+      </div>
+    );
+  }
+
+  renderWon() {
+    return (
+      <div className="won centerer">
+        <div>
+          <p>A winner is you! Another round?</p>
+          <div className="centerer">
+            <button onClick={this.handlePlayAgainClick}>Play again</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  renderLost() {
+    return (
+      <div className="lost centerer">
+        <div>
+          <p>You lose! Better luck next time.</p>
+          <div className="centerer">
+            <button onClick={this.handlePlayAgainClick}>Play again</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  render() {
+    let view;
+
+    switch (this.state.game.status) {
+      case "playing":
+        view = this.renderGame();
+        break;
+      case "won":
+        view = this.renderWon();
+        break;
+      case "lost":
+        view = this.renderLost();
+        break;
+      default:
+        view = <p>Oops. You shouldn't be seeing this. What a shame.</p>;
+    }
+
+    return <div className="app">{view}</div>;
+  }
+}
+
+render(<App />, document.getElementById("root"));
