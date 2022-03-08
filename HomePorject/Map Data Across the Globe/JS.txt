@@ -1,0 +1,101 @@
+d3.json ("https://gist.githubusercontent.com/abenrob/787723ca91772591b47e/raw/8a7f176072d508218e120773943b595c998991be/world-50m.json")
+  .get (
+    (error, json) => {
+      if ( error ) throw error;
+
+      const width = window.innerWidth - 10;
+      const height = width / 2;
+
+      let svg = d3.select ("#container").append ("svg")
+                  .attr ("width", width).attr ("height", height)
+                  .append ('g').attr ('class', 'main_g')
+                  .call (d3.zoom().scaleExtent([1, 10]).on("zoom", zoomed));
+
+      function zoomed () {
+        d3.select ('.main_g').attr ("transform", d3.event.transform);
+      }
+
+      const projection = d3.geoEquirectangular ().scale (height / Math.PI)
+                               .translate ([width / 2, height / 2]);
+
+      const path = d3.geoPath ().projection (projection);
+
+      svg.append("path")
+          .attr("d", path);
+
+      svg.append ('g').insert ('path')
+         .datum (topojson.feature (json, json.objects.land))
+           .attr ('fill', '#999')
+           .attr ('d', path);
+
+      svg.append ('g').insert ('path')
+         .datum (topojson.mesh (json, json.objects.countries, (a, b) => a !== b))
+         .attr ('fill', 'rgba(0,0,0,0)')
+         .attr ('stroke', '#666')
+         .attr ('d', path);
+
+      d3.json ('https://raw.githubusercontent.com/FreeCodeCamp/ProjectReferenceData/master/meteorite-strike-data.json',
+        (error, unfilterjson) => {
+          if ( error ) throw error;
+
+          let json = unfilterjson.features.filter ((val) => {
+            if ( val.properties == null )
+              return false;
+
+            if ( val.properties.mass == null )
+              return false;
+
+            if ( val.geometry == null )
+              return false;
+
+            if ( val.geometry.coordinates == null )
+              return false;
+
+            return true;
+          }).sort ((a, b) => (b.properties.mass - a.properties.mass));
+
+          const circleR = d3.scaleLinear ().domain (
+            [
+              d3.min (json, (d) => parseFloat (d.properties.mass)),
+              d3.max (json, (d) => parseFloat (d.properties.mass))
+            ]
+          ).range ([1.5, 80]);
+
+          const hue = d3.scaleLinear ().domain (
+            [
+              d3.min (json, (d) => parseFloat (d.properties.mass)),
+              d3.max (json, (d) => parseFloat (d.properties.mass))
+            ]
+          ).range ([45, 360]);
+
+          svg.append ('g').selectAll ('circle').data (json).enter ()
+                .append ('circle')
+                  .attr ('r',  (d) => circleR (parseFloat (d.properties.mass)))
+                  .attr ('cy', (d) => projection (d.geometry.coordinates)[1])
+                  .attr ('cx', (d) => projection (d.geometry.coordinates)[0])
+                  .attr ('fill', (d) => (
+                    'hsla(' + hue (parseFloat (d.properties.mass)) + ',100%,50%,0.6)')
+                  )
+                  .attr ('stroke', '#333')
+                  .attr ('stroke-width', '0.3px')
+                  .on ('mouseover', (d) => {
+                    let htmlInfo =
+                      '<strong>Mass:</strong> ' + parseFloat (d.properties.mass) + '<br>'
+                    + '<strong>Name:</strong> ' + d.properties.name + '<br>'
+                    + '<strong>Year:</strong> ' + d.properties.year.split ('-')[0] + '<br>'
+                    + '<strong>Fall:</strong> ' + d.properties.fall + '<br>'
+                    + '<strong>Class:</strong> ' + d.properties.recclass + '<br>'
+                    + '<strong>Id:</strong> ' + d.properties.id;
+
+                    d3.select ('#tip').attr ('class', 'show')
+                      .style ('top', (projection (d.geometry.coordinates)[1] + 10) + 'px')
+                      .style ('left', (projection (d.geometry.coordinates)[0] + 15) + 'px')
+                      .html (htmlInfo);
+                  })
+                  .on ('mouseleave', (d) => {
+                    d3.select ('#tip').attr ('class', 'hide');
+                  });
+        }
+      );
+    }
+  );
